@@ -1,6 +1,8 @@
 from flask import Flask, request, jsonify
 import os
 import requests
+import time
+import uuid
 
 app = Flask(__name__)
 
@@ -8,8 +10,6 @@ app = Flask(__name__)
 def elevenlabs_llm():
     data = request.get_json()
 
-    # Extract the user prompt from the messages list
-    prompt = ""
     try:
         prompt = data["messages"][-1]["content"]
     except Exception:
@@ -33,29 +33,52 @@ def elevenlabs_llm():
     try:
         result = groq_response.json()
         reply = result["choices"][0]["message"]["content"]
-        # Match OpenAI format so ElevenLabs accepts it
+
         return jsonify({
+            "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model,
             "choices": [
                 {
+                    "index": 0,
                     "message": {
                         "role": "assistant",
                         "content": reply
-                    }
+                    },
+                    "finish_reason": "stop"
                 }
-            ]
+            ],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 9,
+                "total_tokens": 19
+            }
         })
+
     except Exception as e:
         print("Groq parse error:", e)
         return jsonify({
+            "id": f"chatcmpl-error-{uuid.uuid4().hex[:8]}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model,
             "choices": [
                 {
+                    "index": 0,
                     "message": {
                         "role": "assistant",
-                        "content": "Sorry, I couldn't think fast enough."
-                    }
+                        "content": "Sorry, something went wrong in my brain."
+                    },
+                    "finish_reason": "stop"
                 }
-            ]
-        }), 200
+            ],
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0
+            }
+        })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
