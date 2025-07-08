@@ -6,10 +6,14 @@ import uuid
 
 app = Flask(__name__)
 
+@app.route("/", methods=["GET"])
+def root():
+    return "Jarvis is online.", 200
+
 @app.route("/v1/chat/completions", methods=["POST"])
 def elevenlabs_llm():
     data = request.get_json()
-    print("Incoming JSON from ElevenLabs:", data)
+    print("🟡 Incoming JSON from ElevenLabs:", data)
 
     try:
         prompt = data["messages"][-1]["content"]
@@ -31,14 +35,21 @@ def elevenlabs_llm():
             },
             json={
                 "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7
+                "messages": [{"role": "user", "content": prompt + "\n\nRespond in 2–3 sentences max."}],
+                "temperature": 0.7,
+                "max_tokens": 200
             },
             timeout=5
         )
 
         result = groq_response.json()
-        reply = result["choices"][0]["message"]["content"]
+        reply = result["choices"][0]["message"]["content"].strip()
+
+        # Optional: Truncate if somehow still too long
+        if len(reply) > 400:
+            reply = reply[:400] + "..."
+
+        print("🟢 Groq reply (trimmed):", reply[:300] + ("..." if len(reply) > 300 else ""))
 
         return (
             jsonify({
@@ -67,7 +78,7 @@ def elevenlabs_llm():
         )
 
     except Exception as e:
-        print("Groq parse error:", e)
+        print("🔴 Groq parse error:", e)
         return (
             jsonify({
                 "id": f"chatcmpl-error-{uuid.uuid4().hex[:8]}",
@@ -79,7 +90,7 @@ def elevenlabs_llm():
                         "index": 0,
                         "message": {
                             "role": "assistant",
-                            "content": "Sorry, something went wrong in my brain."
+                            "content": "Jarvis encountered a brain glitch. Please retry."
                         },
                         "finish_reason": "stop"
                     }
