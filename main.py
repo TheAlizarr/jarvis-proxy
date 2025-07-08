@@ -1,8 +1,5 @@
 from flask import Flask, request, jsonify
-import os
-import requests
-import time
-import uuid
+import os, requests, time, uuid
 
 app = Flask(__name__)
 
@@ -13,21 +10,22 @@ def root():
 @app.route("/v1/chat/completions", methods=["POST"])
 def elevenlabs_llm():
     data = request.get_json()
-    print("🟡 Incoming JSON from ElevenLabs:", data)
+    print("🟡 Incoming from ElevenLabs:", data)
 
-    try:
-        prompt = data["messages"][-1]["content"]
-    except Exception:
-        return (
-            jsonify({"error": "Invalid message format"}),
-            400,
-            {'Content-Type': 'application/json'}
-        )
-
+    # Extract parameters safely
     model = data.get("model", "llama3-8b-8192")
+    messages = data.get("messages", [])
+    temperature = data.get("temperature", 0.7)
+    max_tokens = data.get("max_tokens", 200)
+    # user_id, stream, etc., can be captured if needed
+
+    if not messages:
+        return jsonify({"error": "Missing messages"}), 400
+
+    prompt = messages[-1].get("content", "")
 
     try:
-        groq_response = requests.post(
+        groq_resp = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}",
@@ -35,21 +33,19 @@ def elevenlabs_llm():
             },
             json={
                 "model": model,
-                "messages": [{"role": "user", "content": prompt + "\n\nRespond in 2–3 sentences max."}],
-                "temperature": 0.7,
-                "max_tokens": 200
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+                "max_tokens": max_tokens
             },
             timeout=5
         )
+        groq_resp.raise_for_status()
+        gr = groq_resp.json()
+        reply = gr["choices"][0]["message"]["content"].strip()
+        if not reply:
+            reply = "Sorry, I didn't think of anything."
 
-        result = groq_response.json()
-        reply = result["choices"][0]["message"]["content"].strip()
-
-        # Optional: Truncate if somehow still too long
-        if len(reply) > 400:
-            reply = reply[:400] + "..."
-
-        print("🟢 Groq reply (trimmed):", reply[:300] + ("..." if len(reply) > 300 else ""))
+        usage = gr.get("usage", {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0})
 
         return (
             jsonify({
@@ -57,52 +53,34 @@ def elevenlabs_llm():
                 "object": "chat.completion",
                 "created": int(time.time()),
                 "model": model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": reply
-                        },
-                        "finish_reason": "stop"
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 10,
-                    "completion_tokens": 9,
-                    "total_tokens": 19
-                }
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": reply},
+                    "finish_reason": "stop"
+                }],
+                "usage": usage
             }),
             200,
-            {'Content-Type': 'application/json'}
+            {"Content-Type": "application/json"}
         )
-
     except Exception as e:
-        print("🔴 Groq parse error:", e)
+        print("🔴 Error calling Groq:", e)
         return (
             jsonify({
                 "id": f"chatcmpl-error-{uuid.uuid4().hex[:8]}",
                 "object": "chat.completion",
                 "created": int(time.time()),
                 "model": model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": "Jarvis encountered a brain glitch. Please retry."
-                        },
-                        "finish_reason": "stop"
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0
-                }
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant",
+                                "content": "Jarvis had a brain freeze, please say that again."},
+                    "finish_reason": "stop"
+                }],
+                "usage": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
             }),
             200,
-            {'Content-Type': 'application/json'}
+            {"Content-Type": "application/json"}
         )
 
 if __name__ == "__main__":
