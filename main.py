@@ -1,49 +1,61 @@
 from flask import Flask, request, jsonify
-import requests
 import os
+import requests
 
 app = Flask(__name__)
 
-# You can set this in the Replit Secrets tab for security
-GROQ_API_KEY = os.getenv("GROQ_API_KEY") or "your_groq_api_key_here"  # Replace this for testing only
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama3-8b-8192"
-
-@app.route("/", methods=["GET"])
-def home():
-    return "✅ Flask server is running! Use POST /chat to send prompts.", 200
-
-@app.route("/chat", methods=["POST"])
-def chat():
+@app.route("/v1/chat/completions", methods=["POST"])
+def elevenlabs_llm():
     data = request.get_json()
-    user_prompt = data.get("prompt")
 
-    if not user_prompt:
-        return jsonify({"error": "No prompt provided"}), 400
+    # Extract the user prompt from the messages list
+    prompt = ""
+    try:
+        prompt = data["messages"][-1]["content"]
+    except Exception:
+        return jsonify({"error": "Invalid message format"}), 400
 
-    # Make request to Groq API
-    response = requests.post(
-        GROQ_API_URL,
+    model = data.get("model", "llama3-8b-8192")
+
+    groq_response = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
         headers={
-            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}",
             "Content-Type": "application/json"
         },
         json={
-            "model": GROQ_MODEL,
-            "messages": [
-                {"role": "system", "content": "You are Jarvis, a smart and witty assistant."},
-                {"role": "user", "content": user_prompt}
-            ],
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7
         }
     )
 
-    if response.status_code != 200:
-        return jsonify({"error": "Groq API request failed", "details": response.text}), 500
-
-    result = response.json()
-    reply = result["choices"][0]["message"]["content"]
-    return jsonify({"response": reply}), 200
+    try:
+        result = groq_response.json()
+        reply = result["choices"][0]["message"]["content"]
+        # Match OpenAI format so ElevenLabs accepts it
+        return jsonify({
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": reply
+                    }
+                }
+            ]
+        })
+    except Exception as e:
+        print("Groq parse error:", e)
+        return jsonify({
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Sorry, I couldn't think fast enough."
+                    }
+                }
+            ]
+        }), 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=10000)
